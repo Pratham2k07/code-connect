@@ -1,18 +1,37 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { GlassCard } from '../components/ui/GlassCard';
 import { Button } from '../components/ui/Button';
 import { mockChatMessages, mockPartner } from '../data/mockData';
-import { Send, Sparkles, Code2, Users, FileCode2, Folder, File, ChevronDown, ChevronRight, Terminal } from 'lucide-react';
+import { Send, Sparkles, Code2, Users, FileCode2, Folder, File, ChevronDown, ChevronRight, Terminal, Plus, Play } from 'lucide-react';
 import { motion } from 'framer-motion';
 import Editor from '@monaco-editor/react';
+import { supabase } from '../lib/supabase';
+import { useAuth } from '../contexts/AuthContext';
 
 export function CollaborationRoom() {
+  const { id: roomId } = useParams();
+  const { user } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
   const [roomMode, setRoomMode] = useState(location.state?.mode || 'coding');
+  
+  // File System State
+  const [files, setFiles] = useState([
+    { name: 'App.jsx', language: 'javascript', content: `import React, { useState } from 'react';\nimport { Antigravity } from '@ai/core';\n\nexport default function App() {\n  const [code, setCode] = useState("");\n\n  return (\n    <div className="flex h-screen">\n      <h1 className="text-primary">\n        Coding with ${mockPartner.name}!\n      </h1>\n    </div>\n  );\n}` },
+    { name: 'index.css', language: 'css', content: 'body {\n  margin: 0;\n  background: #0d1117;\n  color: #fff;\n}' }
+  ]);
+  const [activeFileIndex, setActiveFileIndex] = useState(0);
+  const [isAddingFile, setIsAddingFile] = useState(false);
+  const [newFileName, setNewFileName] = useState('');
 
-  // Filter messages for partner and AI
+  // Terminal State
+  const [terminalOutput, setTerminalOutput] = useState('Antigravity Terminal v1.0.0\nReady.\n');
+  const [terminalHeight, setTerminalHeight] = useState(200);
+
+  const channelRef = useRef(null);
+
+  // Chat State
   const partnerChat = mockChatMessages.filter(msg => msg.sender === 'user' || msg.sender === 'partner');
   const aiChat = mockChatMessages.filter(msg => msg.sender === 'ai');
 
@@ -25,11 +44,16 @@ export function CollaborationRoom() {
   const [activeTab, setActiveTab] = useState('ai'); // 'team' or 'ai'
 
   // Resizing state
-  const [rightWidth, setRightWidth] = useState(30); // 30% for the side panel
-  const [explorerWidth, setExplorerWidth] = useState(250); // 250px for file explorer
+  const [rightWidth, setRightWidth] = useState(25); // 25% for the side panel
+  const [explorerWidth, setExplorerWidth] = useState(200); // 200px for file explorer
   
+  // Toggle states
+  const [showTerminal, setShowTerminal] = useState(false);
+  const [showExplorer, setShowExplorer] = useState(true);
+
   const isDraggingRight = useRef(false);
   const isDraggingExplorer = useRef(false);
+  const isDraggingTerminal = useRef(false);
   const containerRef = useRef(null);
 
   useEffect(() => {
@@ -37,15 +61,19 @@ export function CollaborationRoom() {
 
     const handleMouseMove = (e) => {
       if (containerRef.current) {
-        const containerWidth = containerRef.current.getBoundingClientRect().width;
+        const containerRect = containerRef.current.getBoundingClientRect();
         
         if (isDraggingRight.current) {
-          const newRightWidth = ((containerWidth - e.clientX) / containerWidth) * 100;
+          const newRightWidth = ((containerRect.width - (e.clientX - containerRect.left)) / containerRect.width) * 100;
           setRightWidth(Math.max(20, Math.min(newRightWidth, 50)));
         }
         if (isDraggingExplorer.current) {
-          const newExplorerWidth = e.clientX - containerRef.current.getBoundingClientRect().left;
+          const newExplorerWidth = e.clientX - containerRect.left;
           setExplorerWidth(Math.max(150, Math.min(newExplorerWidth, 400)));
+        }
+        if (isDraggingTerminal.current) {
+          const newTerminalHeight = containerRect.bottom - e.clientY;
+          setTerminalHeight(Math.max(100, Math.min(newTerminalHeight, 600)));
         }
       }
     };
@@ -53,6 +81,7 @@ export function CollaborationRoom() {
     const handleMouseUp = () => {
       isDraggingRight.current = false;
       isDraggingExplorer.current = false;
+      isDraggingTerminal.current = false;
       document.body.style.cursor = 'default';
       document.body.classList.remove('select-none');
     };
@@ -65,10 +94,111 @@ export function CollaborationRoom() {
     };
   }, [roomMode]);
 
+  useEffect(() => {
+    if (!roomId) return;
+    
+    const channel = supabase.channel(`room_${roomId}`, {
+      config: {
+        broadcast: { self: false }
+      }
+    });
+    
+    channel.on('broadcast', { event: 'code-change' }, (payload) => {
+      setFiles(prev => {
+        const newFiles = [...prev];
+        if (newFiles[payload.payload.fileIndex]) {
+          newFiles[payload.payload.fileIndex].content = payload.payload.code;
+        }
+        return newFiles;
+      });
+    });
+
+    channel.on('broadcast', { event: 'file-add' }, (payload) => {
+      setFiles(prev => [...prev, payload.payload.file]);
+    });
+    
+    channel.on('broadcast', { event: 'chat-message' }, (payload) => {
+      setPartnerMessages(prev => [...prev, payload.payload.message]);
+    });
+    
+    channel.subscribe((status) => {
+      if (status === 'SUBSCRIBED') {
+        console.log('Joined room:', roomId);
+      }
+    });
+    
+    channelRef.current = channel;
+    
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [roomId]);
+
+  const handleEditorChange = (value) => {
+    const newFiles = [...files];
+    newFiles[activeFileIndex].content = value;
+    setFiles(newFiles);
+
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'code-change',
+        payload: { fileIndex: activeFileIndex, code: value }
+      });
+    }
+  };
+
+  const handleAddFile = (e) => {
+    if (e.key !== 'Enter') return;
+    if (!newFileName.trim()) {
+      setIsAddingFile(false);
+      return;
+    }
+    
+    let lang = 'plaintext';
+    if (newFileName.endsWith('.js') || newFileName.endsWith('.jsx')) lang = 'javascript';
+    else if (newFileName.endsWith('.ts') || newFileName.endsWith('.tsx')) lang = 'typescript';
+    else if (newFileName.endsWith('.css')) lang = 'css';
+    else if (newFileName.endsWith('.html')) lang = 'html';
+    else if (newFileName.endsWith('.py')) lang = 'python';
+    else if (newFileName.endsWith('.json')) lang = 'json';
+    
+    const newFile = { name: newFileName.trim(), language: lang, content: '' };
+    const updatedFiles = [...files, newFile];
+    setFiles(updatedFiles);
+    setActiveFileIndex(updatedFiles.length - 1);
+    setNewFileName('');
+    setIsAddingFile(false);
+    
+    if (channelRef.current) {
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'file-add',
+        payload: { file: newFile }
+      });
+    }
+  };
+
+  const handleRunCode = () => {
+    const file = files[activeFileIndex];
+    setShowTerminal(true);
+    setTerminalOutput(prev => prev + `\n$ node ${file.name}\nRunning ${file.name}...\nSuccess! Process exited with code 0.\n`);
+  };
+
   const handleSendPartner = () => {
     if (!partnerInput.trim()) return;
-    setPartnerMessages([...partnerMessages, { id: Date.now(), sender: 'user', text: partnerInput, timestamp: 'Now' }]);
+    const newMessage = { id: Date.now(), sender: 'user', text: partnerInput, timestamp: 'Now' };
+    setPartnerMessages([...partnerMessages, newMessage]);
     setPartnerInput('');
+
+    if (channelRef.current) {
+      const broadcastMessage = { ...newMessage, sender: 'partner', id: Date.now() + 1 };
+      channelRef.current.send({
+        type: 'broadcast',
+        event: 'chat-message',
+        payload: { message: broadcastMessage }
+      });
+    }
   };
 
   const handleSendAi = () => {
@@ -77,10 +207,7 @@ export function CollaborationRoom() {
     setAiInput('');
   };
 
-  // -----------------------------------------------------
-  // CHAT UI FRAGMENTS
-  // -----------------------------------------------------
-  const PartnerChatContent = () => (
+  const renderPartnerChat = () => (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto mb-4 space-y-4 pr-2 custom-scrollbar">
         {partnerMessages.map(msg => (
@@ -112,7 +239,7 @@ export function CollaborationRoom() {
     </div>
   );
 
-  const AIChatContent = () => (
+  const renderAIChat = () => (
     <div className="flex flex-col h-full">
       <div className="flex-1 overflow-y-auto mb-4 space-y-4 pr-2 custom-scrollbar">
           {aiMessages.map(msg => (
@@ -148,9 +275,6 @@ export function CollaborationRoom() {
     <div className="h-screen pt-20 px-2 sm:px-4 pb-4 max-w-[1800px] mx-auto w-full z-10 relative flex flex-col overflow-hidden">
       
       {roomMode === 'discussion' ? (
-        // -----------------------------------------------------
-        // DISCUSSION MODE
-        // -----------------------------------------------------
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
           animate={{ opacity: 1, y: 0 }}
@@ -166,14 +290,14 @@ export function CollaborationRoom() {
                 <h3 className="text-xl font-bold flex items-center mb-4 text-textMain shrink-0">
                   <Users className="w-6 h-6 mr-3 text-primary" /> Team Chat
                 </h3>
-                <PartnerChatContent />
+                {renderPartnerChat()}
              </GlassCard>
 
              <GlassCard gradient="linear-gradient(137deg, #F59E0B 0%, #D97706 100%)" className="flex flex-col flex-1 p-6 bg-transparent">
                 <h3 className="text-xl font-bold flex items-center mb-4 text-secondary shrink-0">
                   <Terminal className="w-6 h-6 mr-3 text-secondary animate-pulse" /> Antigravity AI
                 </h3>
-                <AIChatContent />
+                {renderAIChat()}
              </GlassCard>
           </div>
           
@@ -188,9 +312,6 @@ export function CollaborationRoom() {
           </div>
         </motion.div>
       ) : (
-        // -----------------------------------------------------
-        // CODING MODE (Antigravity IDE Layout)
-        // -----------------------------------------------------
         <motion.div 
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
@@ -202,87 +323,145 @@ export function CollaborationRoom() {
           <div style={{ width: `${100 - rightWidth}%` }} className="flex h-full relative">
             
             {/* File Explorer Sidebar */}
-            <div style={{ width: `${explorerWidth}px` }} className="flex flex-col bg-[#111827] border-r border-gray-800 shrink-0 h-full overflow-y-auto">
-               <div className="px-4 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-800 flex items-center justify-between">
-                 <span>Explorer</span>
-                 <Terminal className="w-4 h-4 text-secondary" />
-               </div>
-               <div className="py-2 space-y-0.5 text-gray-300 text-sm truncate">
+            {showExplorer && (
+              <div style={{ width: `${explorerWidth}px` }} className="flex flex-col bg-[#111827] border-r border-gray-800 shrink-0 h-full overflow-hidden">
+                 <div className="px-4 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-800 flex items-center justify-between">
+                   <span>Explorer</span>
+                   <button onClick={() => setIsAddingFile(true)} className="hover:text-white transition-colors" title="New File">
+                     <Plus className="w-4 h-4" />
+                   </button>
+                 </div>
+               <div className="py-2 space-y-0.5 text-gray-300 text-sm overflow-y-auto custom-scrollbar flex-1">
                  <div className="flex items-center px-4 py-1.5 hover:bg-white/5 cursor-pointer">
                    <ChevronDown className="w-4 h-4 mr-1 opacity-70" />
                    <Folder className="w-4 h-4 mr-2 text-blue-400" />
                    <span>src</span>
                  </div>
-                 <div className="flex items-center px-4 py-1.5 pl-8 hover:bg-white/5 cursor-pointer bg-white/10 text-white border-l-2 border-secondary">
-                    <FileCode2 className="w-4 h-4 mr-2 text-blue-400" />
-                    <span>App.jsx</span>
-                 </div>
-                 <div className="flex items-center px-4 py-1.5 pl-8 hover:bg-white/5 cursor-pointer">
-                    <File className="w-4 h-4 mr-2 text-yellow-400" />
-                    <span>index.css</span>
-                 </div>
-                 <div className="flex items-center px-4 py-1.5 hover:bg-white/5 cursor-pointer mt-2">
-                   <ChevronRight className="w-4 h-4 mr-1 opacity-70" />
-                   <Folder className="w-4 h-4 mr-2 text-blue-400" />
-                   <span>public</span>
-                 </div>
-                 <div className="flex items-center px-4 py-1.5 pl-8 hover:bg-white/5 cursor-pointer">
-                    <File className="w-4 h-4 mr-2 text-green-400" />
-                    <span>package.json</span>
-                 </div>
+                 
+                 {files.map((file, idx) => (
+                   <div 
+                     key={idx}
+                     onClick={() => setActiveFileIndex(idx)}
+                     className={`flex items-center px-4 py-1.5 pl-8 cursor-pointer ${activeFileIndex === idx ? 'bg-white/10 text-white border-l-2 border-secondary' : 'hover:bg-white/5'}`}
+                   >
+                      <File className={`w-4 h-4 mr-2 ${file.language === 'javascript' ? 'text-blue-400' : file.language === 'css' ? 'text-yellow-400' : 'text-green-400'}`} />
+                      <span className="truncate">{file.name}</span>
+                   </div>
+                 ))}
+
+                 {isAddingFile && (
+                   <div className="flex items-center px-4 py-1.5 pl-8">
+                     <File className="w-4 h-4 mr-2 text-gray-500" />
+                     <input
+                       autoFocus
+                       type="text"
+                       value={newFileName}
+                       onChange={e => setNewFileName(e.target.value)}
+                       onKeyDown={handleAddFile}
+                       onBlur={() => setIsAddingFile(false)}
+                       className="bg-transparent border border-secondary/50 rounded px-1 w-full text-white text-sm outline-none"
+                       placeholder="filename.js"
+                     />
+                   </div>
+                 )}
                </div>
-            </div>
+              </div>
+            )}
 
             {/* Explorer Resizer */}
-            <div 
-              className="w-1 cursor-col-resize hover:bg-secondary/50 bg-transparent transition-colors z-20 absolute top-0 bottom-0"
-              style={{ left: `${explorerWidth}px`, transform: 'translateX(-50%)' }}
-              onMouseDown={() => {
-                isDraggingExplorer.current = true;
-                document.body.style.cursor = 'col-resize';
-                document.body.classList.add('select-none');
-              }}
-            />
+            {showExplorer && (
+              <div 
+                className="w-1 cursor-col-resize hover:bg-secondary/50 bg-transparent transition-colors z-20 absolute top-0 bottom-0"
+                style={{ left: `${explorerWidth}px`, transform: 'translateX(-50%)' }}
+                onMouseDown={() => {
+                  isDraggingExplorer.current = true;
+                  document.body.style.cursor = 'col-resize';
+                  document.body.classList.add('select-none');
+                }}
+              />
+            )}
 
-            {/* Code Editor */}
+            {/* Code Editor & Terminal */}
             <div className="flex flex-col flex-1 h-full overflow-hidden bg-[#0d1117]">
               
               {/* IDE Menu Bar */}
-              <div className="flex items-center px-2 py-0.5 bg-[#111827] text-gray-400 text-[13px] border-b border-gray-800 shrink-0 select-none">
-                <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">File</div>
-                <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Edit</div>
-                <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Selection</div>
-                <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">View</div>
-                <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Go</div>
-                <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Run</div>
-                <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Terminal</div>
-                <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Help</div>
+              <div className="flex items-center justify-between px-2 py-0.5 bg-[#111827] text-gray-400 text-[13px] border-b border-gray-800 shrink-0 select-none">
+                <div className="flex items-center">
+                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">File</div>
+                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Edit</div>
+                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Selection</div>
+                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors" onClick={() => setShowExplorer(!showExplorer)}>View</div>
+                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Go</div>
+                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors" onClick={handleRunCode}>Run</div>
+                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors" onClick={() => setShowTerminal(!showTerminal)}>Terminal</div>
+                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Help</div>
+                </div>
+                <button 
+                  onClick={handleRunCode}
+                  className="flex items-center text-secondary hover:text-white px-3 py-1 bg-secondary/10 hover:bg-secondary/30 rounded transition-colors mr-2"
+                >
+                  <Play className="w-3 h-3 mr-1" /> Run
+                </button>
               </div>
 
               {/* Editor Tabs */}
-              <div className="flex items-center bg-[#111827] border-b border-gray-800">
-                <div className="flex items-center px-4 py-2 bg-[#0d1117] text-white border-t-2 border-secondary border-r border-gray-800 text-sm">
-                  <FileCode2 className="w-4 h-4 mr-2 text-blue-400" /> App.jsx
-                </div>
-                <div className="flex items-center px-4 py-2 text-gray-500 hover:text-gray-300 cursor-pointer text-sm">
-                  <File className="w-4 h-4 mr-2 text-yellow-400" /> index.css
-                </div>
+              <div className="flex items-center bg-[#111827] border-b border-gray-800 overflow-x-auto hide-scrollbar">
+                {files.map((file, idx) => (
+                  <div 
+                    key={idx}
+                    onClick={() => setActiveFileIndex(idx)}
+                    className={`flex items-center px-4 py-2 cursor-pointer text-sm shrink-0 ${activeFileIndex === idx ? 'bg-[#0d1117] text-white border-t-2 border-secondary border-r border-gray-800' : 'text-gray-500 hover:text-gray-300 border-r border-gray-800/50'}`}
+                  >
+                    <File className={`w-4 h-4 mr-2 ${file.language === 'javascript' ? 'text-blue-400' : file.language === 'css' ? 'text-yellow-400' : 'text-green-400'}`} /> 
+                    {file.name}
+                  </div>
+                ))}
               </div>
               
               {/* Code Content */}
-              <div className="flex flex-1 overflow-hidden bg-[#0d1117]">
-                <Editor
-                  height="100%"
-                  defaultLanguage="javascript"
-                  theme="vs-dark"
-                  defaultValue={`import React, { useState } from 'react';\nimport { Antigravity } from '@ai/core';\n\nexport default function App() {\n  const [code, setCode] = useState("");\n\n  return (\n    <div className="flex h-screen">\n      <h1 className="text-primary">\n        Coding with ${mockPartner.name}!\n      </h1>\n    </div>\n  );\n}`}
-                  options={{
-                    minimap: { enabled: false },
-                    fontSize: 14,
-                    wordWrap: 'on',
-                    padding: { top: 16 }
-                  }}
-                />
+              <div className="flex flex-col flex-1 overflow-hidden bg-[#0d1117]">
+                <div className="flex-1 min-h-0">
+                  <Editor
+                    height="100%"
+                    language={files[activeFileIndex].language}
+                    theme="vs-dark"
+                    value={files[activeFileIndex].content}
+                    onChange={handleEditorChange}
+                    options={{
+                      minimap: { enabled: false },
+                      fontSize: 14,
+                      wordWrap: 'on',
+                      padding: { top: 16 }
+                    }}
+                  />
+                </div>
+                
+                {/* Terminal Section (Conditionally Rendered) */}
+                {showTerminal && (
+                  <>
+                    <div 
+                      className="h-1 cursor-row-resize hover:bg-secondary/50 bg-gray-800 transition-colors shrink-0"
+                      onMouseDown={() => {
+                        isDraggingTerminal.current = true;
+                        document.body.style.cursor = 'row-resize';
+                        document.body.classList.add('select-none');
+                      }}
+                    />
+                    
+                    <div style={{ height: `${terminalHeight}px` }} className="bg-[#111827] flex flex-col shrink-0">
+                      <div className="px-4 py-1 text-xs text-gray-400 uppercase tracking-wider border-b border-gray-800 flex items-center justify-between shrink-0 bg-[#0d1117]">
+                        <span>Terminal</span>
+                        <div className="flex gap-3">
+                          <button onClick={() => setTerminalOutput('')} className="hover:text-white">Clear</button>
+                          <button onClick={() => setShowTerminal(false)} className="hover:text-white font-bold text-sm">✕</button>
+                        </div>
+                      </div>
+                      <div className="p-3 font-mono text-[13px] text-gray-300 overflow-y-auto whitespace-pre-wrap flex-1 custom-scrollbar">
+                        {terminalOutput}
+                      </div>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -325,7 +504,7 @@ export function CollaborationRoom() {
             
             {/* Panel Content */}
             <div className="flex-1 p-4 overflow-hidden flex flex-col">
-              {activeTab === 'ai' ? <AIChatContent /> : <PartnerChatContent />}
+              {activeTab === 'ai' ? renderAIChat() : renderPartnerChat()}
             </div>
           </div>
           
