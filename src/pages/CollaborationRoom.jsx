@@ -3,9 +3,25 @@ import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { GlassCard } from '../components/ui/GlassCard';
 import { Button } from '../components/ui/Button';
 import { mockChatMessages, mockPartner } from '../data/mockData';
-import { Send, Sparkles, Code2, Users, FileCode2, Folder, File, ChevronDown, ChevronRight, Terminal, Plus, Play } from 'lucide-react';
+import { Send, Sparkles, Code2, Users, FileCode2, Folder, File, ChevronDown, ChevronRight, Terminal, Plus, Play, Search, GitBranch, Blocks, Settings } from 'lucide-react';
 import { motion } from 'framer-motion';
-import Editor from '@monaco-editor/react';
+import { SandpackProvider, SandpackPreview, SandpackConsole, useSandpack } from "@codesandbox/sandpack-react";
+import { getLanguageFromExtension, getFileIcon, getExecutionCommand } from '../components/ide/utils';
+import { IDETabs } from '../components/ide/IDETabs';
+import { IDEMonacoEditor } from '../components/ide/IDEMonacoEditor';
+import { IDEStatusBar } from '../components/ide/IDEStatusBar';
+import { IDEFileExplorer } from '../components/ide/IDEFileExplorer';
+import { IDEMenuBar } from '../components/ide/IDEMenuBar';
+import { AIAssistant } from '../components/ide/AIAssistant';
+
+const ActiveFileListener = ({ onActiveFileChange }) => {
+  const { sandpack } = useSandpack();
+  React.useEffect(() => {
+    onActiveFileChange(sandpack.activeFile);
+  }, [sandpack.activeFile, onActiveFileChange]);
+  return null;
+};
+import { PROJECT_TEMPLATES } from '../components/ide/projectTemplates';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
 
@@ -16,29 +32,46 @@ export function CollaborationRoom() {
   const location = useLocation();
   const [roomMode, setRoomMode] = useState(location.state?.mode || 'coding');
   
-  // File System State
-  const [files, setFiles] = useState([
-    { name: 'App.jsx', language: 'javascript', content: `import React, { useState } from 'react';\nimport { Antigravity } from '@ai/core';\n\nexport default function App() {\n  const [code, setCode] = useState("");\n\n  return (\n    <div className="flex h-screen">\n      <h1 className="text-primary">\n        Coding with ${mockPartner.name}!\n      </h1>\n    </div>\n  );\n}` },
-    { name: 'index.css', language: 'css', content: 'body {\n  margin: 0;\n  background: #0d1117;\n  color: #fff;\n}' }
-  ]);
-  const [activeFileIndex, setActiveFileIndex] = useState(0);
-  const [isAddingFile, setIsAddingFile] = useState(false);
-  const [newFileName, setNewFileName] = useState('');
+  // Sandpack Files Setup & Templates
+  const [sandpackTemplate, setSandpackTemplate] = useState('static');
+  const [sandpackFiles, setSandpackFiles] = useState({
+    '/index.html': { code: '', hidden: true },
+  });
+  const [openFiles, setOpenFiles] = useState([]);
+  const [activeFile, setActiveFile] = useState(null);
 
-  // Terminal State
-  const [terminalOutput, setTerminalOutput] = useState('Antigravity Terminal v1.0.0\nReady.\n');
-  const [terminalHeight, setTerminalHeight] = useState(200);
+  // Handlers for File Tabs
+  const handleOpenFile = (path) => {
+    if (!openFiles.includes(path)) {
+      setOpenFiles([...openFiles, path]);
+    }
+  };
+
+  const handleCloseFile = (path) => {
+    setOpenFiles(openFiles.filter(f => f !== path));
+  };
+
+  const addNewIDEFile = (path) => {
+    setSandpackFiles(prev => {
+      // Append the new file without destroying others
+      return {
+        ...prev,
+        [path]: { code: '' }
+      };
+    });
+  };
+
+  const customSetup = React.useMemo(() => ({
+    dependencies: { "framer-motion": "latest" }
+  }), []);
 
   const channelRef = useRef(null);
 
   // Chat State
   const partnerChat = mockChatMessages.filter(msg => msg.sender === 'user' || msg.sender === 'partner');
-  const aiChat = mockChatMessages.filter(msg => msg.sender === 'ai');
 
   const [partnerMessages, setPartnerMessages] = useState(partnerChat);
-  const [aiMessages, setAiMessages] = useState(aiChat);
   const [partnerInput, setPartnerInput] = useState('');
-  const [aiInput, setAiInput] = useState('');
   
   // Tab state for the right panel in coding mode
   const [activeTab, setActiveTab] = useState('ai'); // 'team' or 'ai'
@@ -46,10 +79,14 @@ export function CollaborationRoom() {
   // Resizing state
   const [rightWidth, setRightWidth] = useState(25); // 25% for the side panel
   const [explorerWidth, setExplorerWidth] = useState(200); // 200px for file explorer
+  const [terminalHeight, setTerminalHeight] = useState(250); // 250px for terminal
   
   // Toggle states
   const [showTerminal, setShowTerminal] = useState(false);
   const [showExplorer, setShowExplorer] = useState(true);
+  const [mockTerminalLogs, setMockTerminalLogs] = useState(null);
+  const [terminalStdin, setTerminalStdin] = useState('');
+  const [activeTerminalTab, setActiveTerminalTab] = useState('output'); // 'output' or 'input'
 
   const isDraggingRight = useRef(false);
   const isDraggingExplorer = useRef(false);
@@ -103,20 +140,6 @@ export function CollaborationRoom() {
       }
     });
     
-    channel.on('broadcast', { event: 'code-change' }, (payload) => {
-      setFiles(prev => {
-        const newFiles = [...prev];
-        if (newFiles[payload.payload.fileIndex]) {
-          newFiles[payload.payload.fileIndex].content = payload.payload.code;
-        }
-        return newFiles;
-      });
-    });
-
-    channel.on('broadcast', { event: 'file-add' }, (payload) => {
-      setFiles(prev => [...prev, payload.payload.file]);
-    });
-    
     channel.on('broadcast', { event: 'chat-message' }, (payload) => {
       setPartnerMessages(prev => [...prev, payload.payload.message]);
     });
@@ -134,56 +157,7 @@ export function CollaborationRoom() {
     };
   }, [roomId]);
 
-  const handleEditorChange = (value) => {
-    const newFiles = [...files];
-    newFiles[activeFileIndex].content = value;
-    setFiles(newFiles);
 
-    if (channelRef.current) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'code-change',
-        payload: { fileIndex: activeFileIndex, code: value }
-      });
-    }
-  };
-
-  const handleAddFile = (e) => {
-    if (e.key !== 'Enter') return;
-    if (!newFileName.trim()) {
-      setIsAddingFile(false);
-      return;
-    }
-    
-    let lang = 'plaintext';
-    if (newFileName.endsWith('.js') || newFileName.endsWith('.jsx')) lang = 'javascript';
-    else if (newFileName.endsWith('.ts') || newFileName.endsWith('.tsx')) lang = 'typescript';
-    else if (newFileName.endsWith('.css')) lang = 'css';
-    else if (newFileName.endsWith('.html')) lang = 'html';
-    else if (newFileName.endsWith('.py')) lang = 'python';
-    else if (newFileName.endsWith('.json')) lang = 'json';
-    
-    const newFile = { name: newFileName.trim(), language: lang, content: '' };
-    const updatedFiles = [...files, newFile];
-    setFiles(updatedFiles);
-    setActiveFileIndex(updatedFiles.length - 1);
-    setNewFileName('');
-    setIsAddingFile(false);
-    
-    if (channelRef.current) {
-      channelRef.current.send({
-        type: 'broadcast',
-        event: 'file-add',
-        payload: { file: newFile }
-      });
-    }
-  };
-
-  const handleRunCode = () => {
-    const file = files[activeFileIndex];
-    setShowTerminal(true);
-    setTerminalOutput(prev => prev + `\n$ node ${file.name}\nRunning ${file.name}...\nSuccess! Process exited with code 0.\n`);
-  };
 
   const handleSendPartner = () => {
     if (!partnerInput.trim()) return;
@@ -199,12 +173,6 @@ export function CollaborationRoom() {
         payload: { message: broadcastMessage }
       });
     }
-  };
-
-  const handleSendAi = () => {
-    if (!aiInput.trim()) return;
-    setAiMessages([...aiMessages, { id: Date.now(), sender: 'user', text: aiInput, timestamp: 'Now' }]);
-    setAiInput('');
   };
 
   const renderPartnerChat = () => (
@@ -238,41 +206,8 @@ export function CollaborationRoom() {
       </div>
     </div>
   );
-
-  const renderAIChat = () => (
-    <div className="flex flex-col h-full">
-      <div className="flex-1 overflow-y-auto mb-4 space-y-4 pr-2 custom-scrollbar">
-          {aiMessages.map(msg => (
-          <div key={msg.id} className={`flex flex-col ${msg.sender === 'user' ? 'items-end' : 'items-start'}`}>
-            <div className="text-[10px] text-textMuted mb-1 ml-1">{msg.sender === 'user' ? 'You' : 'Antigravity'}</div>
-            <div className={`max-w-[85%] rounded-2xl p-3 text-sm ${
-              msg.sender === 'user' 
-                ? 'bg-secondary text-background rounded-tr-sm shadow-lg shadow-secondary/20' 
-                : 'bg-secondary/10 border border-secondary/30 text-textMain rounded-tl-sm'
-            }`}>
-              <p className="leading-relaxed">{msg.text}</p>
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="flex items-center space-x-2 shrink-0 pt-2 border-t border-cardBorder">
-        <input
-          type="text"
-          value={aiInput}
-          onChange={e => setAiInput(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSendAi()}
-          placeholder="Ask Antigravity to generate code..."
-          className="flex-1 bg-background border border-cardBorder rounded-xl px-3 py-2 focus:outline-none focus:border-secondary/50 text-sm transition-colors min-w-0"
-        />
-        <Button onClick={handleSendAi} className="px-3 h-[38px] bg-secondary hover:bg-secondary/80 shrink-0">
-          <Send className="w-4 h-4" />
-        </Button>
-      </div>
-    </div>
-  );
-
   return (
-    <div className="h-screen pt-20 px-2 sm:px-4 pb-4 max-w-[1800px] mx-auto w-full z-10 relative flex flex-col overflow-hidden">
+    <div className="h-screen w-screen z-10 relative flex flex-col overflow-hidden bg-background pt-[72px]">
       
       {roomMode === 'discussion' ? (
         <motion.div 
@@ -316,154 +251,146 @@ export function CollaborationRoom() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           ref={containerRef} 
-          className="flex flex-1 min-h-0 relative w-full rounded-xl overflow-hidden border border-cardBorder shadow-[0_0_50px_rgba(34,211,238,0.1)] bg-[#0d1117]"
+          className="flex flex-1 min-h-0 relative w-full overflow-hidden bg-[#0d1117]"
         >
           
           {/* Main IDE Area (Explorer + Code) */}
           <div style={{ width: `${100 - rightWidth}%` }} className="flex h-full relative">
-            
-            {/* File Explorer Sidebar */}
-            {showExplorer && (
-              <div style={{ width: `${explorerWidth}px` }} className="flex flex-col bg-[#111827] border-r border-gray-800 shrink-0 h-full overflow-hidden">
-                 <div className="px-4 py-3 text-xs font-bold text-gray-400 uppercase tracking-wider border-b border-gray-800 flex items-center justify-between">
-                   <span>Explorer</span>
-                   <button onClick={() => setIsAddingFile(true)} className="hover:text-white transition-colors" title="New File">
-                     <Plus className="w-4 h-4" />
-                   </button>
-                 </div>
-               <div className="py-2 space-y-0.5 text-gray-300 text-sm overflow-y-auto custom-scrollbar flex-1">
-                 <div className="flex items-center px-4 py-1.5 hover:bg-white/5 cursor-pointer">
-                   <ChevronDown className="w-4 h-4 mr-1 opacity-70" />
-                   <Folder className="w-4 h-4 mr-2 text-blue-400" />
-                   <span>src</span>
-                 </div>
-                 
-                 {files.map((file, idx) => (
-                   <div 
-                     key={idx}
-                     onClick={() => setActiveFileIndex(idx)}
-                     className={`flex items-center px-4 py-1.5 pl-8 cursor-pointer ${activeFileIndex === idx ? 'bg-white/10 text-white border-l-2 border-secondary' : 'hover:bg-white/5'}`}
-                   >
-                      <File className={`w-4 h-4 mr-2 ${file.language === 'javascript' ? 'text-blue-400' : file.language === 'css' ? 'text-yellow-400' : 'text-green-400'}`} />
-                      <span className="truncate">{file.name}</span>
-                   </div>
-                 ))}
-
-                 {isAddingFile && (
-                   <div className="flex items-center px-4 py-1.5 pl-8">
-                     <File className="w-4 h-4 mr-2 text-gray-500" />
-                     <input
-                       autoFocus
-                       type="text"
-                       value={newFileName}
-                       onChange={e => setNewFileName(e.target.value)}
-                       onKeyDown={handleAddFile}
-                       onBlur={() => setIsAddingFile(false)}
-                       className="bg-transparent border border-secondary/50 rounded px-1 w-full text-white text-sm outline-none"
-                       placeholder="filename.js"
-                     />
-                   </div>
-                 )}
-               </div>
-              </div>
-            )}
-
-            {/* Explorer Resizer */}
-            {showExplorer && (
-              <div 
-                className="w-1 cursor-col-resize hover:bg-secondary/50 bg-transparent transition-colors z-20 absolute top-0 bottom-0"
-                style={{ left: `${explorerWidth}px`, transform: 'translateX(-50%)' }}
-                onMouseDown={() => {
-                  isDraggingExplorer.current = true;
-                  document.body.style.cursor = 'col-resize';
-                  document.body.classList.add('select-none');
-                }}
-              />
-            )}
-
-            {/* Code Editor & Terminal */}
-            <div className="flex flex-col flex-1 h-full overflow-hidden bg-[#0d1117]">
-              
-              {/* IDE Menu Bar */}
-              <div className="flex items-center justify-between px-2 py-0.5 bg-[#111827] text-gray-400 text-[13px] border-b border-gray-800 shrink-0 select-none">
-                <div className="flex items-center">
-                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">File</div>
-                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Edit</div>
-                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Selection</div>
-                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors" onClick={() => setShowExplorer(!showExplorer)}>View</div>
-                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Go</div>
-                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors" onClick={handleRunCode}>Run</div>
-                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors" onClick={() => setShowTerminal(!showTerminal)}>Terminal</div>
-                  <div className="px-3 py-1 hover:bg-white/10 hover:text-gray-200 cursor-pointer rounded transition-colors">Help</div>
+            <SandpackProvider 
+                template={sandpackTemplate} 
+                theme="dark" 
+                files={sandpackFiles}
+                customSetup={customSetup}
+                className="w-full h-full flex"
+            >
+              <ActiveFileListener onActiveFileChange={setActiveFile} />
+              <div className="w-full h-full flex flex-1 bg-[#0d1117]">
+                
+                {/* VS Code Activity Bar */}
+                <div className="w-12 bg-[#181818] border-r border-gray-800 flex flex-col items-center py-2 shrink-0 z-10">
+                  <div className="p-2 mb-2 text-white border-l-2 border-white cursor-pointer hover:text-white" onClick={() => setShowExplorer(!showExplorer)}><FileCode2 className="w-6 h-6" /></div>
+                  <div className="p-2 mb-2 text-gray-500 hover:text-white cursor-pointer transition-colors"><Search className="w-6 h-6" /></div>
+                  <div className="p-2 mb-2 text-gray-500 hover:text-white cursor-pointer transition-colors"><GitBranch className="w-6 h-6" /></div>
+                  <div className="p-2 mb-2 text-gray-500 hover:text-white cursor-pointer transition-colors" onClick={() => setShowTerminal(!showTerminal)}><Play className="w-6 h-6" /></div>
+                  <div className="p-2 mb-2 text-gray-500 hover:text-white cursor-pointer transition-colors"><Blocks className="w-6 h-6" /></div>
+                  <div className="mt-auto p-2 text-gray-500 hover:text-white cursor-pointer transition-colors"><Settings className="w-6 h-6" /></div>
                 </div>
-                <button 
-                  onClick={handleRunCode}
-                  className="flex items-center text-secondary hover:text-white px-3 py-1 bg-secondary/10 hover:bg-secondary/30 rounded transition-colors mr-2"
-                >
-                  <Play className="w-3 h-3 mr-1" /> Run
-                </button>
-              </div>
 
-              {/* Editor Tabs */}
-              <div className="flex items-center bg-[#111827] border-b border-gray-800 overflow-x-auto hide-scrollbar">
-                {files.map((file, idx) => (
-                  <div 
-                    key={idx}
-                    onClick={() => setActiveFileIndex(idx)}
-                    className={`flex items-center px-4 py-2 cursor-pointer text-sm shrink-0 ${activeFileIndex === idx ? 'bg-[#0d1117] text-white border-t-2 border-secondary border-r border-gray-800' : 'text-gray-500 hover:text-gray-300 border-r border-gray-800/50'}`}
-                  >
-                    <File className={`w-4 h-4 mr-2 ${file.language === 'javascript' ? 'text-blue-400' : file.language === 'css' ? 'text-yellow-400' : 'text-green-400'}`} /> 
-                    {file.name}
+                {/* File Explorer Sidebar */}
+                {showExplorer && (
+                  <div style={{ width: `${explorerWidth - 48}px`, minWidth: '150px' }} className="flex flex-col bg-[#111827] border-r border-gray-800 shrink-0 h-full overflow-hidden shadow-[4px_0_12px_rgba(0,0,0,0.5)] z-10 relative">
+                     <IDEFileExplorer openFile={handleOpenFile} addNewIDEFile={addNewIDEFile} />
                   </div>
-                ))}
-              </div>
-              
-              {/* Code Content */}
-              <div className="flex flex-col flex-1 overflow-hidden bg-[#0d1117]">
-                <div className="flex-1 min-h-0">
-                  <Editor
-                    height="100%"
-                    language={files[activeFileIndex].language}
-                    theme="vs-dark"
-                    value={files[activeFileIndex].content}
-                    onChange={handleEditorChange}
-                    options={{
-                      minimap: { enabled: false },
-                      fontSize: 14,
-                      wordWrap: 'on',
-                      padding: { top: 16 }
+                )}
+
+                {/* Explorer Resizer */}
+                {showExplorer && (
+                  <div 
+                    className="w-1 cursor-col-resize hover:bg-blue-500 bg-transparent transition-colors z-20 absolute top-0 bottom-0"
+                    style={{ left: `${explorerWidth}px`, transform: 'translateX(-50%)' }}
+                    onMouseDown={() => {
+                      isDraggingExplorer.current = true;
+                      document.body.style.cursor = 'col-resize';
+                      document.body.classList.add('select-none');
                     }}
                   />
-                </div>
-                
-                {/* Terminal Section (Conditionally Rendered) */}
-                {showTerminal && (
-                  <>
-                    <div 
-                      className="h-1 cursor-row-resize hover:bg-secondary/50 bg-gray-800 transition-colors shrink-0"
-                      onMouseDown={() => {
-                        isDraggingTerminal.current = true;
-                        document.body.style.cursor = 'row-resize';
-                        document.body.classList.add('select-none');
-                      }}
-                    />
-                    
-                    <div style={{ height: `${terminalHeight}px` }} className="bg-[#111827] flex flex-col shrink-0">
-                      <div className="px-4 py-1 text-xs text-gray-400 uppercase tracking-wider border-b border-gray-800 flex items-center justify-between shrink-0 bg-[#0d1117]">
-                        <span>Terminal</span>
-                        <div className="flex gap-3">
-                          <button onClick={() => setTerminalOutput('')} className="hover:text-white">Clear</button>
+                )}
+
+                {/* Code Editor & Terminal */}
+                <div className="flex flex-col flex-1 w-full h-full min-w-0 overflow-hidden bg-[#0d1117] relative">
+                  {/* IDE Menu Bar */}
+                  <IDEMenuBar 
+                    setShowExplorer={setShowExplorer}
+                    showExplorer={showExplorer}
+                    setShowTerminal={setShowTerminal}
+                    showTerminal={showTerminal}
+                    setMockTerminalLogs={setMockTerminalLogs}
+                    setSandpackFiles={setSandpackFiles}
+                    setSandpackTemplate={setSandpackTemplate}
+                    terminalStdin={terminalStdin}
+                    setActiveTerminalTab={setActiveTerminalTab}
+                  />
+
+                  {/* IDE Tabs */}
+                  {openFiles.length > 0 && (
+                    <IDETabs openFiles={openFiles} closeFile={handleCloseFile} />
+                  )}
+
+                  {/* Monaco Editor Component or Welcome Screen */}
+                  {openFiles.length > 0 ? (
+                    <IDEMonacoEditor />
+                  ) : (
+                    <div className="flex-1 flex flex-col items-center justify-center bg-[#0d1117] text-gray-500 min-h-0 select-none">
+                       <h2 className="text-4xl font-black mb-4 text-gray-700">Antigravity IDE</h2>
+                       <p className="text-sm">Create a new file in the Explorer to begin.</p>
+                    </div>
+                  )}
+                  
+                  {/* Terminal Section (Conditionally Rendered) */}
+                  {showTerminal && (
+                    <>
+                      <div 
+                        className="h-1 cursor-row-resize hover:bg-blue-500 bg-gray-800 transition-colors shrink-0 z-20 relative"
+                        onMouseDown={() => {
+                          isDraggingTerminal.current = true;
+                          document.body.style.cursor = 'row-resize';
+                          document.body.classList.add('select-none');
+                        }}
+                      />
+                      <div style={{ height: `${terminalHeight}px` }} className="bg-[#111827] flex flex-col shrink-0 shadow-[0_-4px_12px_rgba(0,0,0,0.5)] z-10 relative">
+                        <div className="px-4 py-1.5 text-xs text-gray-400 uppercase tracking-wider border-b border-gray-800 flex items-center justify-between shrink-0 bg-[#0d1117]">
+                          <div className="flex items-center space-x-4">
+                            <span className="text-gray-200 border-b border-gray-400 pb-1 -mb-1.5 font-bold">Terminal</span>
+                            <span 
+                              onClick={() => setActiveTerminalTab('output')}
+                              className={`cursor-pointer transition-colors pb-1 -mb-1.5 border-b ${activeTerminalTab === 'output' ? 'text-gray-200 border-blue-400' : 'hover:text-gray-200 border-transparent'}`}
+                            >
+                              Output
+                            </span>
+                            <span 
+                              onClick={() => setActiveTerminalTab('input')}
+                              className={`cursor-pointer transition-colors pb-1 -mb-1.5 border-b ${activeTerminalTab === 'input' ? 'text-gray-200 border-blue-400' : 'hover:text-gray-200 border-transparent'}`}
+                            >
+                              Stdin
+                            </span>
+                          </div>
                           <button onClick={() => setShowTerminal(false)} className="hover:text-white font-bold text-sm">✕</button>
                         </div>
+                        
+                        {activeTerminalTab === 'input' ? (
+                          <div className="flex-1 p-2 bg-[#0d1117] flex flex-col">
+                             <div className="text-xs text-gray-500 mb-2 px-2">Enter standard input (stdin) before running the program:</div>
+                             <textarea 
+                               className="flex-1 bg-transparent border border-gray-800 rounded p-2 text-gray-300 font-mono text-sm resize-none focus:outline-none focus:border-blue-500"
+                               value={terminalStdin}
+                               onChange={(e) => setTerminalStdin(e.target.value)}
+                               placeholder="e.g. 5\n10 20 30"
+                             />
+                          </div>
+                        ) : mockTerminalLogs ? (
+                          <div className="flex-1 p-4 font-mono text-sm text-gray-300 bg-[#0d1117] overflow-y-auto whitespace-pre-wrap">
+                            {mockTerminalLogs.map((log, i) => (
+                              <div key={i} className={(typeof log === 'string' && log.startsWith('$')) ? 'text-blue-400 font-bold mb-1' : log.type === 'error' ? 'text-red-400' : log.type === 'info' ? 'text-gray-400' : 'text-gray-100'}>
+                                {log.text || log}
+                              </div>
+                            ))}
+                          </div>
+                        ) : (
+                          <SandpackConsole style={{ flex: 1, backgroundColor: '#0d1117' }} />
+                        )}
                       </div>
-                      <div className="p-3 font-mono text-[13px] text-gray-300 overflow-y-auto whitespace-pre-wrap flex-1 custom-scrollbar">
-                        {terminalOutput}
-                      </div>
-                    </div>
-                  </>
-                )}
+                    </>
+                  )}
+                  
+                  {/* Status Bar */}
+                  <IDEStatusBar isSimulating={!!mockTerminalLogs} />
+                </div>
+
+                <div className="hidden">
+                  <SandpackPreview />
+                </div>
               </div>
-            </div>
+            </SandpackProvider>
           </div>
 
           {/* Right Panel Resizer */}
@@ -503,8 +430,9 @@ export function CollaborationRoom() {
             </div>
             
             {/* Panel Content */}
-            <div className="flex-1 p-4 overflow-hidden flex flex-col">
-              {activeTab === 'ai' ? renderAIChat() : renderPartnerChat()}
+            <div className="flex-1 overflow-hidden flex flex-col">
+              {activeTab === 'ai' && <AIAssistant activeFile={activeFile} files={sandpackFiles} />}
+              {activeTab === 'team' && <div className="p-4 flex-1 overflow-hidden">{renderPartnerChat()}</div>}
             </div>
           </div>
           

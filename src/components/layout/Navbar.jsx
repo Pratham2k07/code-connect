@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
-import { Menu, X, ArrowRight } from 'lucide-react';
+import { Menu, X, ArrowRight, LogOut } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ShinyText } from '../ui/ShinyText';
+import { useAuth } from '../../contexts/AuthContext';
+import { supabase } from '../../lib/supabase';
 
 const NAV_LINKS = [
   { label: 'Home', to: '/' },
@@ -14,6 +16,12 @@ const NAV_LINKS = [
 export function Navbar() {
   const navigate = useNavigate();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { user } = useAuth();
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    navigate('/');
+  };
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50">
@@ -50,13 +58,23 @@ export function Navbar() {
 
           {/* CTA + hamburger */}
           <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate('/login')}
-              className="hidden sm:flex items-center gap-2 group px-5 py-2 rounded-full bg-white text-black text-sm font-semibold hover:bg-white/90 transition-all"
-            >
-              Get Started
-              <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
-            </button>
+            {user ? (
+              <button
+                onClick={handleLogout}
+                className="hidden sm:flex items-center gap-2 group px-5 py-2 rounded-full bg-white/10 text-white text-sm font-semibold hover:bg-white/20 transition-all border border-white/20"
+              >
+                Logout
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            ) : (
+              <button
+                onClick={() => navigate('/login')}
+                className="hidden sm:flex items-center gap-2 group px-5 py-2 rounded-full bg-white text-black text-sm font-semibold hover:bg-white/90 transition-all"
+              >
+                Get Started
+                <ArrowRight className="w-3.5 h-3.5 group-hover:translate-x-1 transition-transform" />
+              </button>
+            )}
 
             {/* Hamburger */}
             <button
@@ -89,12 +107,21 @@ export function Navbar() {
                   {link.label}
                 </Link>
               ))}
-              <button
-                onClick={() => { setMobileOpen(false); navigate('/login'); }}
-                className="flex items-center justify-center gap-2 mt-2 px-5 py-3 rounded-full bg-primary text-background text-sm font-semibold"
-              >
-                Get Started <ArrowRight className="w-4 h-4" />
-              </button>
+              {user ? (
+                <button
+                  onClick={() => { setMobileOpen(false); handleLogout(); }}
+                  className="flex items-center justify-center gap-2 mt-2 px-5 py-3 rounded-full bg-white/10 text-white border border-white/20 text-sm font-semibold"
+                >
+                  Logout <LogOut className="w-4 h-4" />
+                </button>
+              ) : (
+                <button
+                  onClick={() => { setMobileOpen(false); navigate('/login'); }}
+                  className="flex items-center justify-center gap-2 mt-2 px-5 py-3 rounded-full bg-primary text-background text-sm font-semibold"
+                >
+                  Get Started <ArrowRight className="w-4 h-4" />
+                </button>
+              )}
             </div>
           </motion.div>
         )}
