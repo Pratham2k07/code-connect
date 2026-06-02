@@ -2,9 +2,11 @@ import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from 'framer-motion';
 import { useNavigate } from 'react-router-dom';
 import { GlassCard } from '../components/ui/GlassCard';
-import { mockPartner } from '../data/mockData';
+import { mockPartner as defaultMockPartner, mockMatchingPool } from '../data/mockData';
 import { Zap, Code2, Sparkles, ChevronRight, HeartHandshake } from 'lucide-react';
 import { generateAiIdeas } from '../utils/ideaGenerator';
+import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../lib/supabase';
 
 /* ─────────────────────────────────────────
    CONFETTI
@@ -40,15 +42,6 @@ function ConfettiBurst({ count = 100 }) {
 /* ─────────────────────────────────────────
    PROFESSIONAL SCANNER STAGE
 ───────────────────────────────────────── */
-const SCAN_PROFILES = [
-  { seed: 'Priya',     stack: ['React', 'TypeScript'],   role: 'Frontend Dev',    color: '#f472b6' },
-  { seed: 'Rustacean', stack: ['Rust', 'WebAssembly'],   role: 'Systems Eng.',    color: '#fb923c' },
-  { seed: 'Devraj',    stack: ['Python', 'FastAPI'],      role: 'Backend Dev',     color: '#22d3ee' },
-  { seed: 'Sam',       stack: ['Solidity', 'Next.js'],   role: 'Web3 Builder',    color: '#a78bfa' },
-  { seed: 'Ninja',     stack: ['Docker', 'Kubernetes'],  role: 'DevOps Eng.',     color: '#4ade80' },
-  { seed: 'Flo',       stack: ['Flutter', 'Firebase'],   role: 'Mobile Dev',      color: '#fde047' },
-];
-
 const SCAN_STEPS = [
   { label: 'Scanning tech stack compatibility...', icon: '⚙️' },
   { label: 'Analyzing collaboration style...',     icon: '🤝' },
@@ -57,13 +50,13 @@ const SCAN_STEPS = [
   { label: 'Finalizing your top match...',         icon: '✅' },
 ];
 
-function ScannerStage({ progress }) {
+function ScannerStage({ progress, scanPool }) {
   const [cardIndex, setCardIndex] = useState(0);
   const [stepIndex, setStepIndex] = useState(0);
   const circumference = 2 * Math.PI * 54;
 
   useEffect(() => {
-    const cardTimer = setInterval(() => setCardIndex(i => i + 1), 2200);
+    const cardTimer = setInterval(() => setCardIndex(i => i + 1), 1800);
     return () => clearInterval(cardTimer);
   }, []);
 
@@ -72,7 +65,7 @@ function ScannerStage({ progress }) {
     setStepIndex(step);
   }, [Math.floor(progress / 22)]);
 
-  const profile = SCAN_PROFILES[cardIndex % SCAN_PROFILES.length];
+  const profile = scanPool[cardIndex % scanPool.length] || scanPool[0];
 
   return (
     <div className="flex flex-col lg:flex-row items-center justify-center gap-12 w-full max-w-4xl">
@@ -170,14 +163,14 @@ function ScannerStage({ progress }) {
               <div className="p-5 flex flex-col gap-3">
                 <div className="flex items-center gap-3">
                   <img
-                    src={`https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.seed}&backgroundColor=b6e3f4`}
+                    src={profile.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${profile.name}&backgroundColor=b6e3f4`}
                     className="w-12 h-12 rounded-full border-2"
-                    style={{ borderColor: `${profile.color}60` }}
-                    alt={profile.seed}
+                    style={{ borderColor: `${profile.color || '#22d3ee'}60` }}
+                    alt={profile.name}
                   />
                   <div>
-                    <p className="font-bold text-textMain text-sm">@{profile.seed.toLowerCase()}</p>
-                    <p className="text-xs font-medium" style={{ color: profile.color }}>{profile.role}</p>
+                    <p className="font-bold text-textMain text-sm">@{profile.name?.toLowerCase() || 'dev'}</p>
+                    <p className="text-xs font-medium" style={{ color: profile.color || '#22d3ee' }}>{profile.role || 'Developer'}</p>
                   </div>
                   {/* Analyzing badge */}
                   <div className="ml-auto flex items-center gap-1 text-xs text-textMuted font-medium">
@@ -192,7 +185,7 @@ function ScannerStage({ progress }) {
 
                 {/* Stack */}
                 <div className="flex gap-1.5 flex-wrap">
-                  {profile.stack.map(s => (
+                  {(profile.tech_stack || profile.stack || []).slice(0, 4).map(s => (
                     <span key={s} className="text-xs px-2.5 py-1 rounded-lg border border-cardBorder text-textMuted font-medium">{s}</span>
                   ))}
                 </div>
@@ -225,10 +218,10 @@ function ScannerStage({ progress }) {
 
         {/* Card counter dots */}
         <div className="flex gap-1.5">
-          {SCAN_PROFILES.map((_, i) => (
+          {scanPool.slice(0, 10).map((_, i) => (
             <motion.div key={i}
               className="w-1.5 h-1.5 rounded-full"
-              animate={{ backgroundColor: i === cardIndex % SCAN_PROFILES.length ? '#22d3ee' : 'rgba(255,255,255,0.15)' }}
+              animate={{ backgroundColor: i === cardIndex % Math.min(scanPool.length, 10) ? '#22d3ee' : 'rgba(255,255,255,0.15)' }}
               transition={{ duration: 0.3 }}
             />
           ))}
@@ -245,7 +238,7 @@ function ScannerStage({ progress }) {
 /* ─────────────────────────────────────────
    LOCK-ON STAGE
 ───────────────────────────────────────── */
-function LockOnStage() {
+function LockOnStage({ partner }) {
   const [phase, setPhase] = useState(0); // 0=flying in, 1=connected, 2=done
 
   useEffect(() => {
@@ -298,9 +291,9 @@ function LockOnStage() {
           initial={{ x: 140, opacity: 0 }} animate={{ x: phase >= 1 ? 70 : 140, opacity: 1 }}
           transition={{ duration: 0.8, type: 'spring', stiffness: 120 }}>
           <div className="w-20 h-20 rounded-full border-3 border-secondary shadow-[0_0_25px_rgba(244,114,182,0.5)] overflow-hidden bg-card">
-            <img src={mockPartner.avatar} className="w-full h-full" alt={mockPartner.name} />
+            <img src={partner?.avatar} className="w-full h-full" alt={partner?.name} />
           </div>
-          <span className="text-xs text-secondary font-bold mt-2">{mockPartner.name}</span>
+          <span className="text-xs text-secondary font-bold mt-2">{partner?.name}</span>
         </motion.div>
       </div>
 
@@ -336,12 +329,17 @@ function Counter({ target, duration = 1800 }) {
 ───────────────────────────────────────── */
 export function MatchDashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [stage, setStage] = useState('searching'); // searching | lockon | found | dashboard
   const [showConfetti, setShowConfetti] = useState(false);
   const [selectedIdea, setSelectedIdea] = useState(null);
   const [dynamicIdeas, setDynamicIdeas] = useState([]);
   const [isGenerating, setIsGenerating] = useState(true);
 
+  // Matchmaking State
+  const [finalPartner, setFinalPartner] = useState(defaultMockPartner);
+  const [scanPool, setScanPool] = useState(mockMatchingPool);
+  
   // Searching state
   const [progress, setProgress] = useState(0);
   const progressRef = useRef(null);
@@ -354,6 +352,117 @@ export function MatchDashboard() {
     'Finalizing your match...',
   ];
   const [searchPhaseIdx, setSearchPhaseIdx] = useState(0);
+
+  // 1. MATCHMAKING ALGORITHM
+  useEffect(() => {
+    async function calculatePerfectMatch() {
+      try {
+        let userProfile = null;
+        let pool = mockMatchingPool; // start with mock pool
+
+        if (user) {
+          // Fetch current user
+          const { data: currentUserData } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', user.id)
+            .single();
+          
+          if (currentUserData) userProfile = currentUserData;
+
+          // Fetch other users
+          const { data: otherUsers } = await supabase
+            .from('profiles')
+            .select('*')
+            .neq('id', user.id)
+            .limit(50);
+          
+          if (otherUsers && otherUsers.length > 0) {
+            pool = [...otherUsers, ...mockMatchingPool]; // combine pools
+          }
+        }
+
+        setScanPool(pool);
+
+        // Score pool
+        let bestScore = -1;
+        let bestMatch = pool[0];
+        let bestSharedData = { sharedTech: [], sharedInterests: [] };
+
+        pool.forEach(candidate => {
+          let score = 0;
+          const sharedTech = [];
+          const sharedInterests = [];
+
+          if (userProfile) {
+            // Tech stack overlap (40 pts max)
+            const userTech = userProfile.tech_stack || [];
+            const candTech = candidate.tech_stack || [];
+            userTech.forEach(t => {
+              if (candTech.includes(t)) {
+                score += 15;
+                sharedTech.push(t);
+              }
+            });
+            score = Math.min(score, 40);
+
+            // Interests overlap (30 pts max)
+            const userInt = userProfile.interests || [];
+            const candInt = candidate.interests || [];
+            userInt.forEach(i => {
+              if (candInt.includes(i)) {
+                score += 10;
+                sharedInterests.push(i);
+              }
+            });
+            score = Math.min(score, 30);
+
+            // Goals overlap (20 pts max)
+            const userGoals = userProfile.goals || [];
+            const candGoals = candidate.goals || [];
+            userGoals.forEach(g => {
+              if (candGoals.includes(g)) { score += 10; }
+            });
+            score = Math.min(score, 20);
+
+            // Preference (10 pts)
+            if (userProfile.preference === candidate.gender || userProfile.preference === 'Anyone') score += 5;
+            if (candidate.preference === userProfile.gender || candidate.preference === 'Anyone') score += 5;
+          } else {
+            // Mock baseline if not logged in
+            score = candidate.id === 'mock1' ? 95 : 65 + Math.random() * 20;
+          }
+
+          // Ensure minimum visual score
+          score = Math.max(score, 55);
+
+          if (score > bestScore) {
+            bestScore = score;
+            bestMatch = candidate;
+            bestSharedData = {
+              sharedTech: sharedTech.length ? sharedTech : (candidate.tech_stack || []).slice(0, 3),
+              sharedInterests: sharedInterests.length ? sharedInterests : (candidate.interests || []).slice(0, 3)
+            };
+          }
+        });
+
+        // Set final winner
+        setFinalPartner({
+          id: bestMatch.id,
+          name: bestMatch.name || bestMatch.seed || 'Developer',
+          avatar: bestMatch.avatar || `https://api.dicebear.com/7.x/avataaars/svg?seed=${bestMatch.name}&backgroundColor=b6e3f4`,
+          vibeScore: Math.floor(bestScore),
+          sharedTech: bestSharedData.sharedTech.length ? bestSharedData.sharedTech : ['React', 'Node.js'],
+          sharedInterests: bestSharedData.sharedInterests.length ? bestSharedData.sharedInterests : ['Startups', 'Web Dev'],
+        });
+
+      } catch (err) {
+        console.error("Matchmaking error:", err);
+      }
+    }
+    
+    calculatePerfectMatch();
+  }, [user]);
 
   // Auto-progress
   useEffect(() => {
@@ -400,11 +509,11 @@ export function MatchDashboard() {
   useEffect(() => {
     if (stage !== 'dashboard') return;
     const t = setTimeout(() => {
-      setDynamicIdeas(generateAiIdeas(mockPartner.sharedTech, 3));
+      setDynamicIdeas(generateAiIdeas(finalPartner.sharedTech, 3));
       setIsGenerating(false);
     }, 1200);
     return () => clearTimeout(t);
-  }, [stage]);
+  }, [stage, finalPartner]);
 
   return (
     <div className="min-h-screen pt-20 px-4 pb-20 max-w-6xl mx-auto w-full z-10 relative flex flex-col items-center justify-center">
@@ -438,7 +547,7 @@ export function MatchDashboard() {
               </AnimatePresence>
             </div>
 
-            <ScannerStage progress={progress} />
+            <ScannerStage progress={progress} scanPool={scanPool} />
           </motion.div>
         )}
 
@@ -449,7 +558,7 @@ export function MatchDashboard() {
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 1.1 }}
             transition={{ type: 'spring', stiffness: 200, damping: 18 }}>
-            <LockOnStage />
+            <LockOnStage partner={finalPartner} />
           </motion.div>
         )}
 
@@ -479,9 +588,9 @@ export function MatchDashboard() {
                 initial={{ scale: 0, rotate: -180 }}
                 animate={{ scale: 1, rotate: 0 }}
                 transition={{ type: 'spring', stiffness: 160, damping: 12, delay: 0.1 }}
-                className="w-36 h-36 rounded-full border-4 border-primary shadow-[0_0_80px_rgba(34,211,238,0.8)] overflow-hidden relative z-10"
+                className="w-36 h-36 rounded-full border-4 border-primary shadow-[0_0_80px_rgba(34,211,238,0.8)] overflow-hidden relative z-10 bg-card"
               >
-                <img src={mockPartner.avatar} alt={mockPartner.name} className="w-full h-full object-cover" />
+                <img src={finalPartner.avatar} alt={finalPartner.name} className="w-full h-full object-cover" />
               </motion.div>
             </div>
 
@@ -497,7 +606,7 @@ export function MatchDashboard() {
 
             <motion.h2 initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.5 }}
               className="text-2xl font-bold text-textMuted mb-8">
-              You & <span className="text-primary">{mockPartner.name}</span> are a legendary duo
+              You & <span className="text-primary">{finalPartner.name}</span> are a legendary duo
             </motion.h2>
 
             {/* Vibe score — big and fun */}
@@ -505,13 +614,13 @@ export function MatchDashboard() {
               transition={{ delay: 0.7, type: 'spring', stiffness: 200 }}
               className="relative p-8 rounded-3xl border border-primary/30 bg-primary/5 shadow-[0_0_50px_rgba(34,211,238,0.15)] mb-8">
               <div className="text-8xl font-black text-primary tabular-nums mb-1">
-                <Counter target={mockPartner.vibeScore} duration={1500} />%
+                <Counter target={finalPartner.vibeScore} duration={1500} />%
               </div>
               <div className="text-sm font-bold text-textMuted uppercase tracking-widest">🔥 Vibe Score</div>
               <div className="mt-4 w-48 h-3 bg-cardBorder rounded-full overflow-hidden mx-auto">
                 <motion.div className="h-full rounded-full"
                   style={{ background: 'linear-gradient(90deg, #22d3ee, #f472b6, #4ade80)' }}
-                  initial={{ width: '0%' }} animate={{ width: `${mockPartner.vibeScore}%` }}
+                  initial={{ width: '0%' }} animate={{ width: `${finalPartner.vibeScore}%` }}
                   transition={{ duration: 1.5, delay: 0.4, ease: 'easeOut' }}
                 />
               </div>
@@ -519,7 +628,7 @@ export function MatchDashboard() {
 
             {/* Shared tech flying in */}
             <div className="flex flex-wrap gap-2 justify-center max-w-xs">
-              {mockPartner.sharedTech.map((tech, i) => (
+              {finalPartner.sharedTech.map((tech, i) => (
                 <motion.span key={tech}
                   initial={{ opacity: 0, y: 20, scale: 0.5 }}
                   animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -550,7 +659,7 @@ export function MatchDashboard() {
                 <span>You're Matched!</span>
               </div>
               <h1 className="text-4xl font-black text-textMain mb-1">
-                You & <span className="shimmer-text">{mockPartner.name}</span>
+                You & <span className="shimmer-text">{finalPartner.name}</span>
               </h1>
               <p className="text-textMuted">Now pick what you want to build together.</p>
             </div>
@@ -561,12 +670,12 @@ export function MatchDashboard() {
                 <GlassCard gradient="linear-gradient(137deg, #4361EE 0%, #E0AEFF 45%, #F72585 100%)" className="h-full">
                   <div className="flex flex-col items-center mb-6">
                     <div className="relative mb-4">
-                      <img src={mockPartner.avatar} alt="Avatar" className="w-24 h-24 rounded-full border-2 border-primary/40 shadow-[0_0_20px_rgba(34,211,238,0.3)]" />
+                      <img src={finalPartner.avatar} alt="Avatar" className="w-24 h-24 rounded-full border-2 border-primary/40 shadow-[0_0_20px_rgba(34,211,238,0.3)] bg-card" />
                       <div className="absolute -bottom-1 -right-1 w-8 h-8 rounded-full bg-primary flex items-center justify-center text-background font-black text-xs shadow-lg">
-                        {mockPartner.vibeScore}%
+                        {finalPartner.vibeScore}%
                       </div>
                     </div>
-                    <h2 className="text-2xl font-bold text-textMain">{mockPartner.name}</h2>
+                    <h2 className="text-2xl font-bold text-textMain">{finalPartner.name}</h2>
                     <div className="flex items-center text-primary mt-1">
                       <Zap className="w-4 h-4 mr-1" /><span className="text-sm font-semibold">Vibe Match</span>
                     </div>
@@ -577,7 +686,7 @@ export function MatchDashboard() {
                         <Code2 className="w-3.5 h-3.5 mr-2 text-primary" /> Shared Stack
                       </h3>
                       <div className="flex flex-wrap gap-1.5">
-                        {mockPartner.sharedTech.map((t, i) => (
+                        {finalPartner.sharedTech.map((t, i) => (
                           <motion.span key={t} initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }}
                             transition={{ delay: 0.3 + i * 0.08, type: 'spring' }}
                             className="px-2.5 py-1 rounded-lg bg-primary/10 border border-primary/25 text-xs text-primary font-medium">{t}</motion.span>
@@ -589,7 +698,7 @@ export function MatchDashboard() {
                         <Sparkles className="w-3.5 h-3.5 mr-2 text-secondary" /> Shared Interests
                       </h3>
                       <div className="flex flex-wrap gap-1.5">
-                        {mockPartner.sharedInterests.map((interest, i) => (
+                        {finalPartner.sharedInterests.map((interest, i) => (
                           <motion.span key={interest} initial={{ opacity: 0, scale: 0.5 }} animate={{ opacity: 1, scale: 1 }}
                             transition={{ delay: 0.4 + i * 0.08, type: 'spring' }}
                             className="px-2.5 py-1 rounded-lg bg-secondary/10 border border-secondary/25 text-xs text-secondary font-medium">{interest}</motion.span>
@@ -621,7 +730,7 @@ export function MatchDashboard() {
                           <div className="text-5xl animate-bounce">🤖</div>
                           <div>
                             <h3 className="text-lg font-bold text-textMain">AI is brainstorming...</h3>
-                            <p className="text-sm text-textMuted mt-1">Mixing <span className="text-primary">{mockPartner.sharedTech.join(' + ')}</span></p>
+                            <p className="text-sm text-textMuted mt-1">Mixing <span className="text-primary">{finalPartner.sharedTech.join(' + ')}</span></p>
                           </div>
                         </motion.div>
                       ) : (
@@ -666,7 +775,7 @@ export function MatchDashboard() {
                               </motion.div>
                               <div className="relative z-10">
                                 <h3 className="font-black text-lg text-gradient-primary uppercase tracking-wide">Free Play Mode</h3>
-                                <p className="text-sm text-textMuted mt-1">Skip AI suggestions. Chat with <span className="text-primary font-semibold">{mockPartner.name}</span> and build your own thing!</p>
+                                <p className="text-sm text-textMuted mt-1">Skip AI suggestions. Chat with <span className="text-primary font-semibold">{finalPartner.name}</span> and build your own thing!</p>
                               </div>
                             </div>
                           </motion.div>
@@ -677,7 +786,7 @@ export function MatchDashboard() {
 
                   <div className="mt-5 pt-4 border-t border-cardBorder shrink-0">
                     <motion.button
-                      onClick={() => navigate('/room/1', { state: { mode: selectedIdea === 'custom' ? 'discussion' : 'coding', ideaId: selectedIdea } })}
+                      onClick={() => navigate(`/room/${finalPartner.id || '1'}`, { state: { mode: selectedIdea === 'custom' ? 'discussion' : 'coding', ideaId: selectedIdea, partner: finalPartner } })}
                       disabled={!selectedIdea}
                       whileHover={selectedIdea ? { scale: 1.02 } : {}}
                       whileTap={selectedIdea ? { scale: 0.98 } : {}}

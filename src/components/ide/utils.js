@@ -80,6 +80,7 @@ export const getExecutionCommand = (filename, ext) => {
     case 'rs': return `rustc ${name} && ./${base}`;
     case 'php': return `php ${name}`;
     case 'sh': return `bash ${name}`;
+    case 'rb': return `ruby ${name}`;
     default: return `node ${name}`;
   }
 };

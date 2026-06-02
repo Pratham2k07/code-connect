@@ -67,7 +67,7 @@ function AnimatedCounter({ target, suffix = '' }) {
 }
 
 /* ─── Tech Marquee ─── */
-const TECH_TAGS = ['React', 'Python', 'Go', 'Rust', 'TypeScript', 'Flutter', 'Next.js', 'Node.js', 'TensorFlow', 'Solidity', 'Swift', 'Kotlin', 'Docker', 'AWS', 'Vue', 'Angular'];
+const TECH_TAGS = ['React', 'Python', 'Go', 'Rust', 'TypeScript', 'Node.js', 'Next.js', 'TailwindCSS', 'C++', 'Java', 'Ruby', 'PHP', 'Docker', 'AWS', 'Vue', 'Express'];
 
 function TechMarquee() {
   const doubled = [...TECH_TAGS, ...TECH_TAGS];
