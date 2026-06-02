@@ -14,13 +14,6 @@ import { IDEFileExplorer } from '../components/ide/IDEFileExplorer';
 import { IDEMenuBar } from '../components/ide/IDEMenuBar';
 import { AIAssistant } from '../components/ide/AIAssistant';
 
-const ActiveFileListener = ({ onActiveFileChange }) => {
-  const { sandpack } = useSandpack();
-  React.useEffect(() => {
-    onActiveFileChange(sandpack.activeFile);
-  }, [sandpack.activeFile, onActiveFileChange]);
-  return null;
-};
 import { PROJECT_TEMPLATES } from '../components/ide/projectTemplates';
 import { supabase } from '../lib/supabase';
 import { useAuth } from '../contexts/AuthContext';
@@ -47,10 +40,15 @@ export function CollaborationRoom() {
     if (!openFiles.includes(path)) {
       setOpenFiles([...openFiles, path]);
     }
+    setActiveFile(path);
   };
 
   const handleCloseFile = (path) => {
-    setOpenFiles(openFiles.filter(f => f !== path));
+    const newOpenFiles = openFiles.filter(f => f !== path);
+    setOpenFiles(newOpenFiles);
+    if (activeFile === path) {
+      setActiveFile(newOpenFiles.length > 0 ? newOpenFiles[newOpenFiles.length - 1] : null);
+    }
   };
 
   const addNewIDEFile = (path) => {
@@ -360,7 +358,6 @@ export function CollaborationRoom() {
               customSetup={customSetup}
           >
           <div className="flex w-full h-full relative">
-          <ActiveFileListener onActiveFileChange={setActiveFile} />
           
           {/* Main IDE Area (Explorer + Code) */}
           <div style={{ width: `${100 - rightWidth}%` }} className="flex h-full relative">
@@ -447,6 +444,7 @@ export function CollaborationRoom() {
                 )}
 
                 {/* Code Editor & Terminal */}
+                <div className="flex flex-col flex-1 w-full h-full min-w-0 overflow-hidden bg-[#0d1117] relative">
                   {/* IDE Menu Bar */}
                   <IDEMenuBar 
                     setShowExplorer={setShowExplorer}
