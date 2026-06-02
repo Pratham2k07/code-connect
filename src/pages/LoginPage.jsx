@@ -13,7 +13,6 @@ export function LoginPage() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false);
 
   useEffect(() => {
     if (user) {
@@ -51,29 +50,38 @@ export function LoginPage() {
         navigate('/setup');
         return;
       }
-      if (isSignUp) {
-        const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
-          email,
-          password,
-        });
-        if (signUpError) throw signUpError;
-        
-        if (signUpData.session) {
-           navigate('/setup');
+      
+      // Attempt to sign in first
+      const { data, error } = await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
+
+      if (error) {
+        if (error.message.includes('Invalid login credentials')) {
+          // Attempt to auto-create account
+          const { data: signUpData, error: signUpError } = await supabase.auth.signUp({
+            email,
+            password,
+          });
+          
+          if (signUpError) {
+            if (signUpError.message.includes('User already registered') || signUpError.message.includes('already exists')) {
+               throw new Error("Incorrect password. Please try again.");
+            }
+            throw signUpError;
+          }
+          
+          if (signUpData.session) {
+             navigate('/setup');
+          } else {
+             alert('Account created! Please check your email to verify your account (if enabled in Supabase).');
+          }
         } else {
-           alert('Please disable "Confirm email" in your Supabase Auth settings for seamless login!');
-        }
-      } else {
-        const { data, error } = await supabase.auth.signInWithPassword({
-          email,
-          password,
-        });
-        
-        if (error) {
           throw error;
-        } else if (data.user) {
-          navigate('/setup');
         }
+      } else if (data.user) {
+        navigate('/setup');
       }
     } catch (error) {
       alert(error.message);
@@ -139,17 +147,8 @@ export function LoginPage() {
                 />
               </div>
               <Button type="submit" variant="primary" className="w-full h-12" disabled={loading}>
-                {loading ? 'Authenticating...' : (isSignUp ? 'Sign Up' : 'Sign In')}
+                {loading ? 'Authenticating...' : 'Continue with Email'}
               </Button>
-              <div className="text-center">
-                <button 
-                  type="button" 
-                  onClick={() => setIsSignUp(!isSignUp)}
-                  className="text-sm text-primary hover:underline bg-transparent border-none cursor-pointer mt-2"
-                >
-                  {isSignUp ? 'Already have an account? Sign In' : 'Need an account? Sign Up'}
-                </button>
-              </div>
             </form>
           </div>
 
