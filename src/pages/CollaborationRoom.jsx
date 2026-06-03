@@ -704,7 +704,6 @@ export function CollaborationRoom() {
                 </div>
               )}
             </div>
-            </div>
           </div>
           </div>
         </motion.div>
