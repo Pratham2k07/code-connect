@@ -1,6 +1,10 @@
 {
   "rewrites": [
     {
+      "source": "/api/wandbox/:path*",
+      "destination": "https://wandbox.org/api/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }
