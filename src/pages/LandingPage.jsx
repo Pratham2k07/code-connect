@@ -73,8 +73,8 @@ function TechMarquee() {
   const doubled = [...TECH_TAGS, ...TECH_TAGS];
   return (
     <div className="relative overflow-hidden py-4">
-      <div className="absolute left-0 top-0 bottom-0 w-24 z-10 bg-gradient-to-r from-black to-transparent" />
-      <div className="absolute right-0 top-0 bottom-0 w-24 z-10 bg-gradient-to-l from-black to-transparent" />
+      <div className="absolute left-0 top-0 bottom-0 w-16 sm:w-24 z-10 bg-gradient-to-r from-black to-transparent" />
+      <div className="absolute right-0 top-0 bottom-0 w-16 sm:w-24 z-10 bg-gradient-to-l from-black to-transparent" />
       <motion.div
         className="flex gap-4 whitespace-nowrap"
         animate={{ x: ['0%', '-50%'] }}
@@ -171,13 +171,13 @@ export function LandingPage() {
             initial={{ opacity: 0, y: -10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 0.3, duration: 0.6 }}
-            className="flex flex-col lg:flex-row justify-between gap-4 mb-auto pt-4"
+            className="flex flex-col gap-4 mb-auto pt-4 text-center lg:flex-row lg:items-center lg:justify-between lg:text-left"
           >
-            <p className="text-white/70 text-sm text-base max-w-sm leading-relaxed">
+            <p className="text-white/70 text-sm sm:text-base max-w-full lg:max-w-sm leading-relaxed mx-auto lg:mx-0">
               We connect talented developers worldwide to build real projects, real startups, and real friendships.
             </p>
-            <p className="text-white/70 text-sm text-base lg:text-right font-semibold">
-              12,000+ Talented Developers Matched !
+            <p className="text-white/70 text-sm sm:text-base lg:text-right font-semibold mx-auto lg:mx-0">
+              12,000+ Talented Developers Matched!
             </p>
           </motion.div>
 

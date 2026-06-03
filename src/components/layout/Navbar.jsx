@@ -39,7 +39,7 @@ export function Navbar() {
               shineColor="#ffffff"
               speed={4}
               spread={120}
-              className="font-bold text-xl tracking-tight"
+              className="font-bold text-lg sm:text-xl tracking-tight"
             />
           </Link>
 

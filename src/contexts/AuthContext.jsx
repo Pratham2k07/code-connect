@@ -1,16 +1,23 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 const AuthContext = createContext({});
 
 export const useAuth = () => useContext(AuthContext);
 
 export const AuthProvider = ({ children }) => {
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const configured = isSupabaseConfigured;
+  const [user, setUser] = useState(
+    configured ? null : { id: 'guest', email: 'guest@codeconnect.local', role: 'guest' }
+  );
+  const [loading, setLoading] = useState(configured);
 
   useEffect(() => {
-    // Check active session and sets the user
+    if (!configured) {
+      return;
+    }
+
+    // Check active session and set the user
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       setLoading(false);
@@ -23,7 +30,7 @@ export const AuthProvider = ({ children }) => {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [configured]);
 
   return (
     <AuthContext.Provider value={{ user, loading }}>

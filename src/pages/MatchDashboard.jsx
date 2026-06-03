@@ -6,7 +6,7 @@ import { mockPartner as defaultMockPartner, mockMatchingPool } from '../data/moc
 import { Zap, Code2, Sparkles, ChevronRight, HeartHandshake } from 'lucide-react';
 import { generateAiIdeas } from '../utils/ideaGenerator';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 /* ─────────────────────────────────────────
    CONFETTI
@@ -68,11 +68,11 @@ function ScannerStage({ progress, scanPool }) {
   const profile = scanPool[cardIndex % scanPool.length] || scanPool[0];
 
   return (
-    <div className="flex flex-col lg:flex-row items-center justify-center gap-12 w-full max-w-4xl">
+    <div className="flex flex-col lg:flex-row items-center justify-center gap-12 w-full max-w-4xl px-4 lg:px-0">
 
       {/* LEFT — Progress ring */}
       <div className="flex flex-col items-center gap-6 shrink-0">
-        <div className="relative w-44 h-44 flex items-center justify-center">
+        <div className="relative w-36 h-36 sm:w-44 sm:h-44 flex items-center justify-center">
           {/* Outer glow */}
           <div className="absolute inset-0 rounded-full"
             style={{ background: 'radial-gradient(circle, rgba(34,211,238,0.08), transparent 70%)' }} />
@@ -111,7 +111,7 @@ function ScannerStage({ progress, scanPool }) {
         </div>
 
         {/* Step list */}
-        <div className="space-y-2 w-52">
+        <div className="space-y-2 w-full max-w-xs">
           {SCAN_STEPS.map((step, i) => (
             <motion.div key={step.label}
               initial={{ opacity: 0, x: -10 }}
@@ -139,7 +139,7 @@ function ScannerStage({ progress, scanPool }) {
         <p className="text-xs font-bold text-textMuted uppercase tracking-widest">Evaluating Profile</p>
 
         {/* Card */}
-        <div className="relative w-64 overflow-hidden" style={{ height: 220 }}>
+        <div className="relative w-full max-w-md overflow-hidden" style={{ height: 220 }}>
           <AnimatePresence mode="wait">
             <motion.div key={cardIndex}
               initial={{ opacity: 0, x: 80, scale: 0.95 }}
@@ -257,7 +257,7 @@ function LockOnStage({ partner }) {
         <motion.div className="absolute flex flex-col items-center"
           initial={{ x: -140, opacity: 0 }} animate={{ x: phase >= 1 ? -70 : -140, opacity: 1 }}
           transition={{ duration: 0.8, type: 'spring', stiffness: 120 }}>
-          <div className="w-20 h-20 rounded-full border-3 border-primary shadow-[0_0_25px_rgba(34,211,238,0.5)] overflow-hidden bg-card">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-3 border-primary shadow-[0_0_25px_rgba(34,211,238,0.5)] overflow-hidden bg-card">
             <img src="https://api.dicebear.com/7.x/avataaars/svg?seed=You&backgroundColor=c0aede" className="w-full h-full" alt="You" />
           </div>
           <span className="text-xs text-primary font-bold mt-2">You</span>
@@ -290,7 +290,7 @@ function LockOnStage({ partner }) {
         <motion.div className="absolute flex flex-col items-center"
           initial={{ x: 140, opacity: 0 }} animate={{ x: phase >= 1 ? 70 : 140, opacity: 1 }}
           transition={{ duration: 0.8, type: 'spring', stiffness: 120 }}>
-          <div className="w-20 h-20 rounded-full border-3 border-secondary shadow-[0_0_25px_rgba(244,114,182,0.5)] overflow-hidden bg-card">
+          <div className="w-16 h-16 sm:w-20 sm:h-20 rounded-full border-3 border-secondary shadow-[0_0_25px_rgba(244,114,182,0.5)] overflow-hidden bg-card">
             <img src={partner?.avatar} className="w-full h-full" alt={partner?.name} />
           </div>
           <span className="text-xs text-secondary font-bold mt-2">{partner?.name}</span>
@@ -360,7 +360,7 @@ export function MatchDashboard() {
         let userProfile = null;
         let pool = mockMatchingPool; // start with mock pool
 
-        if (user) {
+        if (user && isSupabaseConfigured) {
           // Fetch current user
           const { data: currentUserData } = await supabase
             .from('profiles')
@@ -380,8 +380,20 @@ export function MatchDashboard() {
           if (otherUsers && otherUsers.length > 0) {
             pool = [...otherUsers, ...mockMatchingPool]; // combine pools
           }
+        } else {
+          // Fallback to local storage profile if Supabase is offline
+          const localProfileStr = localStorage.getItem('localUserProfile');
+          if (localProfileStr) {
+            try {
+              userProfile = JSON.parse(localProfileStr);
+            } catch (e) {
+              console.error(e);
+            }
+          }
         }
 
+        // Shuffle pool to avoid picking the same person on ties
+        pool = [...pool].sort(() => Math.random() - 0.5);
         setScanPool(pool);
 
         // Score pool
@@ -395,6 +407,9 @@ export function MatchDashboard() {
           const sharedInterests = [];
 
           if (userProfile) {
+            // Start with a base vibe score to ensure good matches
+            score = 45 + Math.random() * 15;
+
             // Tech stack overlap (40 pts max)
             const userTech = userProfile.tech_stack || [];
             const candTech = candidate.tech_stack || [];
@@ -404,7 +419,6 @@ export function MatchDashboard() {
                 sharedTech.push(t);
               }
             });
-            score = Math.min(score, 40);
 
             // Interests overlap (30 pts max)
             const userInt = userProfile.interests || [];
@@ -415,7 +429,6 @@ export function MatchDashboard() {
                 sharedInterests.push(i);
               }
             });
-            score = Math.min(score, 30);
 
             // Goals overlap (20 pts max)
             const userGoals = userProfile.goals || [];
@@ -423,14 +436,16 @@ export function MatchDashboard() {
             userGoals.forEach(g => {
               if (candGoals.includes(g)) { score += 10; }
             });
-            score = Math.min(score, 20);
 
             // Preference (10 pts)
             if (userProfile.preference === candidate.gender || userProfile.preference === 'Anyone') score += 5;
             if (candidate.preference === userProfile.gender || candidate.preference === 'Anyone') score += 5;
+
+            // Cap at 99
+            score = Math.min(score, 99);
           } else {
             // Mock baseline if not logged in
-            score = candidate.id === 'mock1' ? 95 : 65 + Math.random() * 20;
+            score = 65 + Math.random() * 30;
           }
 
           // Ensure minimum visual score

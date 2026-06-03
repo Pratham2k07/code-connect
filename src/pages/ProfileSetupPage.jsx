@@ -6,7 +6,7 @@ import { GlassCard } from '../components/ui/GlassCard';
 import { mockInterests, mockTechStacks, mockGoals } from '../data/mockData';
 import { Search } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseConfigured } from '../lib/supabase';
 
 export function ProfileSetupPage() {
   const navigate = useNavigate();
@@ -24,7 +24,7 @@ export function ProfileSetupPage() {
     if (step < 4) {
       setStep(step + 1);
     } else {
-      if (user) {
+      if (user && isSupabaseConfigured) {
         try {
           const { error } = await supabase.from('profiles').upsert({
             id: user.id,
@@ -40,6 +40,15 @@ export function ProfileSetupPage() {
           alert("Error saving profile: " + error.message);
           return;
         }
+      } else {
+        // Save to local storage for local testing fallback
+        localStorage.setItem('localUserProfile', JSON.stringify({
+          gender,
+          preference,
+          tech_stack: selectedTech,
+          interests: selectedInterests,
+          goals: selectedGoals
+        }));
       }
       navigate('/dashboard');
     }
@@ -98,7 +107,7 @@ export function ProfileSetupPage() {
 
               <div className="mb-6">
                 <h3 className="text-sm font-semibold text-textMuted uppercase tracking-wider mb-3">I identify as</h3>
-                <div className="flex gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row">
                   {['Male', 'Female', 'Non-binary'].map(g => (
                     <button
                       key={g}
@@ -117,7 +126,7 @@ export function ProfileSetupPage() {
 
               <div className="mb-6">
                 <h3 className="text-sm font-semibold text-textMuted uppercase tracking-wider mb-3">I'm looking to collaborate with</h3>
-                <div className="flex gap-3">
+                <div className="flex flex-col gap-3 sm:flex-row">
                   {['Male', 'Female', 'Anyone'].map(p => (
                     <button
                       key={p}
@@ -147,7 +156,7 @@ export function ProfileSetupPage() {
               <h2 className="text-3xl font-bold mb-2 text-textMain">What's your Tech Stack?</h2>
               <p className="text-textMuted mb-6">Select the tools you love building with.</p>
               
-              <div className="relative mb-6 max-w-sm">
+              <div className="relative mb-6 max-w-full">
                 <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-textMuted" />
                 <input
                   type="text"

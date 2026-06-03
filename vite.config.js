@@ -14,5 +14,14 @@ export default defineConfig({
         secure: true,
       }
     }
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./tests/setup.js'],
+    globals: true,
+    env: {
+      VITE_SUPABASE_URL: 'https://mock-url.supabase.co',
+      VITE_SUPABASE_ANON_KEY: 'mock-key'
+    }
   }
 })
