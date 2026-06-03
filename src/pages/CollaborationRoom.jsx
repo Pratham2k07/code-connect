@@ -304,7 +304,12 @@ export function CollaborationRoom() {
   );
   return (
     <div className="h-screen w-screen z-10 relative flex flex-col overflow-hidden bg-background pt-[72px]">
-      
+      <SandpackProvider 
+          template={sandpackTemplate} 
+          theme="dark" 
+          files={sandpackFiles}
+          customSetup={customSetup}
+      >
       {roomMode === 'discussion' ? (
         <motion.div 
           initial={{ opacity: 0, y: 20 }}
@@ -328,7 +333,9 @@ export function CollaborationRoom() {
                 <h3 className="text-xl font-bold flex items-center mb-4 text-secondary shrink-0">
                   <Terminal className="w-6 h-6 mr-3 text-secondary animate-pulse" /> Antigravity AI
                 </h3>
-                {renderAIChat()}
+                <div className="flex-1 overflow-hidden rounded-xl border border-secondary/30 relative">
+                  <AIAssistant />
+                </div>
              </GlassCard>
           </div>
           
@@ -351,12 +358,6 @@ export function CollaborationRoom() {
           className="flex flex-1 min-h-0 relative w-full overflow-hidden"
           style={{ background: '#0b0f19' }}
         >
-          <SandpackProvider 
-              template={sandpackTemplate} 
-              theme="dark" 
-              files={sandpackFiles}
-              customSetup={customSetup}
-          >
           <div className="flex w-full h-full relative">
           
           {/* Main IDE Area (Explorer + Code) */}
@@ -703,11 +704,12 @@ export function CollaborationRoom() {
                 </div>
               )}
             </div>
+            </div>
           </div>
           </div>
-          </SandpackProvider>
         </motion.div>
       )}
+      </SandpackProvider>
     </div>
   );
 }
